@@ -15,24 +15,30 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-# @torch.jit.script # good to enable when not using torch.compile, disable when using (our default)
-def new_gelu(x):
-    """
-    Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT).
-    Reference: Gaussian Error Linear Units (GELU) paper: https://arxiv.org/abs/1606.08415
-    """
-    return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3.0))))
+# # @torch.jit.script # good to enable when not using torch.compile, disable when using (our default)
+# def new_gelu(x):
+#     """
+#     Implementation of the GELU activation function currently in Google BERT repo (identical to OpenAI GPT).
+#     Reference: Gaussian Error Linear Units (GELU) paper: https://arxiv.org/abs/1606.08415
+#     """
+#     return 0.5 * x * (1.0 + torch.tanh(math.sqrt(2.0 / math.pi) * (x + 0.044715 * torch.pow(x, 3.0))))
 
-class LayerNorm(nn.Module):
-    """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
+# class LayerNorm(nn.Module):
+#     """ LayerNorm but with an optional bias. PyTorch doesn't support simply bias=False """
+#
+#     def __init__(self, ndim, bias):
+#         super().__init__()
+#         self.weight = nn.Parameter(torch.ones(ndim))
+#         self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
+#
+#     def forward(self, input):
+#         return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
+class LayerNorm(nn.LayerNorm):
+    """ LayerNorm wrapper with an optional bias. PyTorch doesn't support simply bias=False """
 
-    def __init__(self, ndim, bias):
-        super().__init__()
-        self.weight = nn.Parameter(torch.ones(ndim))
-        self.bias = nn.Parameter(torch.zeros(ndim)) if bias else None
-
-    def forward(self, input):
-        return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
+    def __init__(self, ndim, bias, **kwargs):
+        super().__init__(ndim, **kwargs)
+        self.bias = self.bias if bias else None
 
 class CausalSelfAttention(nn.Module):
 
@@ -88,12 +94,13 @@ class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+        self.gelu    = nn.GELU(approximate='tanh')
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
         x = self.c_fc(x)
-        x = new_gelu(x)
+        x = self.gelu(x)
         x = self.c_proj(x)
         x = self.dropout(x)
         return x
@@ -150,6 +157,9 @@ class GPT(nn.Module):
         for pn, p in self.named_parameters():
             if pn.endswith('c_proj.weight'):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
+
+        # when flash == False: this excludes the causal mask from being broadcasted across ranks when using ddp
+        self._ddp_params_and_buffers_to_ignore = [f"transformer.h.{i}.attn.bias" for i in range(config.n_layer)]
 
         # report number of parameters
         print("number of parameters: %.2fM" % (self.get_num_params()/1e6,))
@@ -222,9 +232,9 @@ class GPT(nn.Module):
         # n_layer, n_head and n_embd are determined from model_type
         config_args = {
             'gpt2':         dict(n_layer=12, n_head=12, n_embd=768),  # 124M params
-            'gpt2-medium':  dict(n_layer=24, n_head=16, n_embd=1024), # 350M params
-            'gpt2-large':   dict(n_layer=36, n_head=20, n_embd=1280), # 774M params
-            'gpt2-xl':      dict(n_layer=48, n_head=25, n_embd=1600), # 1558M params
+            'gpt2-medium':  dict(n_layer=24, n_head=16, n_embd=1024), # 354M params
+            'gpt2-large':   dict(n_layer=36, n_head=20, n_embd=1280), # 772M params
+            'gpt2-xl':      dict(n_layer=48, n_head=25, n_embd=1600), # 1555M params
         }[model_type]
         print("forcing vocab_size=50257, block_size=1024, bias=True")
         config_args['vocab_size'] = 50257 # always 50257 for GPT model checkpoints
