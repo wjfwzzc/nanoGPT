@@ -2,6 +2,7 @@
 Sample from a trained model
 """
 import os
+import time
 import pickle
 from contextlib import nullcontext
 import torch
@@ -87,9 +88,13 @@ start_ids = encode(start)
 x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 
 # run generation
-with torch.no_grad():
+with torch.inference_mode():
     with ctx:
+        t0 = time.time()
         for k in range(num_samples):
-            y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+            y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k, use_cache=False)
             print(decode(y[0].tolist()))
-            print('---------------')
+            t1 = time.time()
+            dt = t1 - t0
+            t0 = t1
+            print(f'time {dt*1000:.2f}ms ---------------')
