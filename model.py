@@ -157,6 +157,14 @@ class GPT(nn.Module):
         for pn, p in self.named_parameters():
             if pn.endswith('c_proj.weight'):
                 torch.nn.init.normal_(p, mean=0.0, std=0.02/math.sqrt(2 * config.n_layer))
+            # if pn.endswith('c_attn.weight'):
+            #     torch.nn.init.normal_(p, mean=0.0, std=config.n_embd ** -0.5)
+            # elif pn.endswith('c_fc.weight'):
+            #     torch.nn.init.normal_(p, mean=0.0, std=(2 * config.n_embd) ** -0.5)
+            # elif pn.endswith('c_proj.weight'):
+            #     torch.nn.init.normal_(p, mean=0.0, std=(config.n_embd ** -0.5) * ((2 * config.n_layer) ** -0.5))
+            # elif pn.endswith('wpe.weight'):
+            #     torch.nn.init.normal_(p, mean=0.0, std=0.01)
 
         # when flash == False: this excludes the causal mask from being broadcasted across ranks when using ddp
         self._ddp_params_and_buffers_to_ignore = [f"transformer.h.{i}.attn.bias" for i in range(config.n_layer)]
